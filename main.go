@@ -10,15 +10,12 @@ import (
 	"go/token"
 	"go/types"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -45,93 +42,21 @@ func main() {
 		usage()
 	}
 
+	b, _ := exec.Command("go", "env", "GOROOT").CombinedOutput()
+	Goroot = strings.TrimSpace(string(b))
+
 	switch os.Args[1] {
-	case "daemon":
-		b, _ := exec.Command("go", "env", "GOROOT").CombinedOutput()
-		Goroot = strings.TrimSpace(string(b))
-		startServer()
-	default:
-		client := connect()
-
-		defer client.Close()
-
-		cwd, _ := os.Getwd()
-		req := []byte(cwd)
-		req = append(req, ' ')
-		req = append(req, []byte(strings.Join(os.Args[1:], " "))...)
-		req = append(req, 0)
-
-		_, err := client.Write(req)
-		if err != nil {
-			fmt.Printf("write: %v\n", err)
-			os.Exit(1)
-		}
-
-		if len(os.Args) >= 3 && os.Args[1] == "describe" && os.Args[2] == "-modified" {
-			buf, _ := ioutil.ReadAll(os.Stdin)
-			buf = append(buf, 0)
-			_, err = client.Write(buf)
-			if err != nil {
-				fmt.Printf("write: %v\n", err)
-				os.Exit(1)
-			}
-		}
-
-		fmt.Printf("copying client stuff to stdout\n")
-		io.Copy(os.Stdout, client)
-	}
-}
-
-var serveMu sync.Mutex
-var requestWorkingDirectory string
-
-func serve(conn io.ReadWriteCloser) (close bool) {
-	serveMu.Lock()
-	defer serveMu.Unlock()
-	defer conn.Close()
-	defer func() {
-		if ierr := recover(); ierr != nil {
-			log.Printf("panic: %v", ierr)
-			skip := 1
-			for {
-				pc, file, line, ok := runtime.Caller(skip)
-				if !ok {
-					break
-				}
-				skip++
-				log.Printf("\t%s:%d %#x", file, line, pc)
-			}
-		}
-	}()
-	rd := bufio.NewReader(conn)
-	req, err := rd.ReadBytes(0)
-	if err != nil {
-		log.Printf("error reading request: %v", err)
-		return false
-	}
-
-	req = req[:len(req)-1]
-
-	fields := strings.SplitN(string(req), " ", 3)
-
-	requestWorkingDirectory = fields[0]
-
-	switch fields[1] {
 	case "describe":
-		describe(conn, rd, fields[2])
-	case "quit":
-		if verbose {
-			log.Printf("quitting")
-		}
-		return true
+		w := bufio.NewWriter(os.Stdout)
+		defer w.Flush()
+		describe(w, bufio.NewReader(os.Stdin), os.Args[2:])
 	default:
-		fmt.Fprintf(conn, "unknown command: %q\n", fields[0])
-	}
+		fmt.Printf("unknown command: %q\n", os.Args[1])
 
-	return false
+	}
 }
 
-func describe(out io.Writer, rd *bufio.Reader, args string) {
+func describe(out io.Writer, rd *bufio.Reader, args []string) {
 	modified, path, pos, ok := parseDescribeArgs(out, args)
 	if !ok {
 		return
@@ -183,12 +108,17 @@ func describe(out io.Writer, rd *bufio.Reader, args string) {
 	}, nil)
 }
 
-func parseDescribeArgs(out io.Writer, args string) (modified bool, path string, pos [2]int, ok bool) {
-	const modifiedFlag = "-modified "
-	modified = false
-	if strings.HasPrefix(args, modifiedFlag) {
-		args = args[len(modifiedFlag):]
+func parseDescribeArgs(out io.Writer, argv []string) (modified bool, path string, pos [2]int, ok bool) {
+	if len(argv) <= 0 {
+		fmt.Fprintf(out, "could not parse describe argument %q", argv)
+		return
+	}
+
+	args := argv[0]
+
+	if argv[0] == "-modified" {
 		modified = true
+		args = argv[1]
 	}
 
 	colon := strings.LastIndex(args, ":")
@@ -266,7 +196,8 @@ func loadPackages(out io.Writer, path string, modfiles map[string][]byte) ([]*pa
 		}
 	}
 	currentFileSet = token.NewFileSet()
-	return packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: requestWorkingDirectory, Fset: currentFileSet, ParseFile: parseFile}, filepath.Dir(path))
+	wd, _ := os.Getwd()
+	return packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: wd, Fset: currentFileSet, ParseFile: parseFile}, filepath.Dir(path))
 }
 
 func findNodeInFile(pkg *packages.Package, root *ast.File, pos [2]int, autoexpand bool) ast.Node {
@@ -475,7 +406,8 @@ func findNodeInPackages(pkgs []*packages.Package, pkgpath string, pos token.Pos)
 			if verbose {
 				log.Printf("loading syntax for %q", pkg.PkgPath)
 			}
-			pkgs2, err := packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: requestWorkingDirectory, Fset: pkg.Fset}, pkg.PkgPath)
+			wd, _ := os.Getwd()
+			pkgs2, err := packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: wd, Fset: pkg.Fset}, pkg.PkgPath)
 			if err != nil {
 				return true
 			}
