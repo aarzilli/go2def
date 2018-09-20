@@ -1,0 +1,37 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "9t0JXT9GjzJ/iO8iEeF4vmXVWfs=",
+			"path": "golang.org/x/tools/go/gcexportdata",
+			"revision": "90fa682c2a6e6a37b3a1364ce2fe1d5e41af9d6d",
+			"revisionTime": "2018-09-08T00:11:41Z"
+		},
+		{
+			"checksumSHA1": "VQ0sTJYKkzzAvWA6zvaKD5lar0o=",
+			"path": "golang.org/x/tools/go/internal/cgo",
+			"revision": "90fa682c2a6e6a37b3a1364ce2fe1d5e41af9d6d",
+			"revisionTime": "2018-09-08T00:11:41Z"
+		},
+		{
+			"checksumSHA1": "9bR3Z/WT+tL2ymcfIKe8g70TtTw=",
+			"path": "golang.org/x/tools/go/internal/gcimporter",
+			"revision": "90fa682c2a6e6a37b3a1364ce2fe1d5e41af9d6d",
+			"revisionTime": "2018-09-08T00:11:41Z"
+		},
+		{
+			"checksumSHA1": "TolIgzrB5dLBgLK+UOhujqcbUnM=",
+			"path": "golang.org/x/tools/go/packages",
+			"revision": "90fa682c2a6e6a37b3a1364ce2fe1d5e41af9d6d",
+			"revisionTime": "2018-09-08T00:11:41Z"
+		},
+		{
+			"checksumSHA1": "A9iRFqQ/86KLnQZQYg2l4A7uWPY=",
+			"path": "golang.org/x/tools/go/types/typeutil",
+			"revision": "90fa682c2a6e6a37b3a1364ce2fe1d5e41af9d6d",
+			"revisionTime": "2018-09-08T00:11:41Z"
+		}
+	],
+	"rootPath": "github.com/aarzilli/go2def"
+}
