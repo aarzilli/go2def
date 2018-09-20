@@ -1,20 +1,19 @@
 package main
 
 import (
-	"os"
-	"fmt"
-	"io"
 	"bufio"
+	"fmt"
+	"go/ast"
+	"go/printer"
+	"go/token"
+	"go/types"
+	"io"
 	"log"
-	"strings"
+	"os"
 	"runtime"
 	"strconv"
-	"path/filepath"
-	"go/ast"
-	"go/token"
-	"go/printer"
-	"go/types"
-	
+	"strings"
+
 	"golang.org/x/tools/go/packages"
 )
 
@@ -37,29 +36,29 @@ func main() {
 		fmt.Printf("not enough arguments\n")
 		usage()
 	}
-	
+
 	switch os.Args[1] {
 	case "daemon":
 		startServer()
 	default:
 		client := connect()
-		
+
 		defer client.Close()
-		
+
 		cwd, _ := os.Getwd()
 		req := []byte(cwd)
 		req = append(req, ' ')
 		req = append(req, []byte(strings.Join(os.Args[1:], " "))...)
 		req = append(req, 0)
-		
+
 		_, err := client.Write(req)
 		if err != nil {
 			fmt.Printf("write: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		//TODO: -modified
-		
+
 		io.Copy(os.Stdout, client)
 	}
 }
@@ -86,13 +85,13 @@ func serve(conn io.ReadWriteCloser) (close bool) {
 		log.Printf("error reading request: %v", err)
 		return false
 	}
-	
+
 	req = req[:len(req)-1]
-	
+
 	fields := strings.SplitN(string(req), " ", 3)
-	
+
 	cwd := fields[0]
-	
+
 	switch fields[1] {
 	case "describe":
 		describe(conn, cwd, fields[2])
@@ -104,7 +103,7 @@ func serve(conn io.ReadWriteCloser) (close bool) {
 	default:
 		fmt.Fprintf(conn, "unknown command: %q\n", fields[0])
 	}
-	
+
 	return false
 }
 
@@ -113,24 +112,24 @@ func describe(out io.Writer, cwd, args string) {
 	if !ok {
 		return
 	}
-	
+
 	if verbose {
 		log.Printf("describe modified=%v path=%q start=%d end=%d", modified, path, pos[0], pos[1])
 	}
-	
+
 	pkgs, err := loadPackages(out, cwd, path)
 	if err != nil {
 		fmt.Fprintf(out, "loading packages: %v", err)
 		return
 	}
-	
+
 	if verbose && debugLoadPackages {
 		packages.Visit(pkgs, func(pkg *packages.Package) bool {
 			log.Printf("package %v\n", pkg)
 			return true
 		}, nil)
 	}
-	
+
 	packages.Visit(pkgs, func(pkg *packages.Package) bool {
 		for i := range pkg.Syntax {
 			//TODO: better way to match file?
@@ -153,8 +152,7 @@ func parseDescribeArgs(out io.Writer, args string) (modified bool, path string, 
 		args = args[len(modifiedFlag):]
 		modified = true
 	}
-	
-	
+
 	colon := strings.LastIndex(args, ":")
 	if colon < 0 {
 		fmt.Fprintf(out, "could not parse describe argument %q", args)
@@ -177,21 +175,14 @@ func parseDescribeArgs(out io.Writer, args string) (modified bool, path string, 
 	if len(v) == 1 {
 		pos[1] = pos[0]
 	}
-	
+
 	ok = true
 	return
 }
 
-func loadPackages(out io.Writer, cwd, path string) ([]*packages.Package, error) {
-	//TODO: 
-	// - replace modified files in parse
-	// - use package cache
-	return packages.Load(&packages.Config{ Mode: packages.LoadAllSyntax, Dir: cwd }, filepath.Dir(path))
-}
-
 func findNodeInFile(pkg *packages.Package, root *ast.File, pos [2]int, autoexpand bool) ast.Node {
 	//TODO: implement autoexpand
-	v := &exactVisitor{ pos, pkg, nil }
+	v := &exactVisitor{pos, pkg, nil}
 	ast.Walk(v, root)
 	return v.ret
 }
@@ -221,22 +212,22 @@ func describeNode(out io.Writer, pkg *packages.Package, pkgs []*packages.Package
 			fmt.Fprintf(out, "unknown identifier %v\n", node)
 			return
 		}
-		
-		pos := pkg.Fset.Position(obj.Pos())
-		fmt.Fprintf(out, "%s:%d\n\n", pos.Filename, pos.Line)
-		
+
 		declnode := findNodeInPackages(pkgs, obj.Pkg().Path(), obj.Pos())
 		if verbose {
 			log.Printf("declaration node %v\n", declnode)
 		}
-		
+
 		if declnode != nil {
-			describeDeclaration(out, pkg, declnode, obj.Type())
+			describeDeclaration(out, declnode, obj.Type())
 		} else {
 			fmt.Fprintf(out, "%s\n", obj)
+			describeType(out, "type:", obj.Type())
 		}
-		
-		
+
+		pos := getPosition(obj.Pos())
+		fmt.Fprintf(out, "\n%s:%d\n", pos.Filename, pos.Line)
+
 	case *ast.SelectorExpr:
 		sel := pkg.TypesInfo.Selections[node]
 		if sel == nil {
@@ -245,27 +236,24 @@ func describeNode(out io.Writer, pkg *packages.Package, pkgs []*packages.Package
 				return
 			}
 			fmt.Fprintf(out, "unknown selector expression ")
-			printer.Fprint(out, pkg.Fset, node)
+			printer.Fprint(out, getFileSet(node.Pos()), node)
 			fmt.Fprintf(out, "\n")
 			return
 		}
-		
+
 		obj := sel.Obj()
-		pos := pkg.Fset.Position(obj.Pos())
-		fmt.Fprintf(out, "%s:%d\n\n", pos.Filename, pos.Line)
-		
-		
+
 		fallbackdescr := true
-		
+
 		declnode := findNodeInPackages(pkgs, obj.Pkg().Path(), obj.Pos())
 		if declnode != nil {
 			switch declnode := declnode.(type) {
 			case *ast.FuncDecl:
-				printFunc(out, pkg, declnode)
+				printFunc(out, declnode)
 				fallbackdescr = false
 			}
 		}
-		
+
 		if fallbackdescr {
 			switch sel.Kind() {
 			case types.FieldVal:
@@ -277,49 +265,49 @@ func describeNode(out io.Writer, pkg *packages.Package, pkgs []*packages.Package
 			default:
 				fmt.Fprintf(out, "unknown selector ")
 			}
-			
-			printer.Fprint(out, pkg.Fset, node)
+
+			printer.Fprint(out, getFileSet(node.Pos()), node)
 			fmt.Fprintf(out, "\n")
-			describeType(out, pkg, "receiver:", sel.Recv())
-			describeType(out, pkg, "type:", sel.Type())
+			describeType(out, "receiver:", sel.Recv())
+			describeType(out, "type:", sel.Type())
 		}
-		
+
+		pos := getPosition(obj.Pos())
+		fmt.Fprintf(out, "\n%s:%d\n", pos.Filename, pos.Line)
+
 	case ast.Expr:
 		typeAndVal := pkg.TypesInfo.Types[node]
-		describeType(out, pkg, "type:", typeAndVal.Type)
+		describeType(out, "type:", typeAndVal.Type)
 	}
-	
-	
+
 	//TODO: implement
 	// - if it's a selector expression and the first element is a package name do the same thing
 }
 
-func describeDeclaration(out io.Writer, pkg *packages.Package, declnode ast.Node, typ types.Type) {
+func describeDeclaration(out io.Writer, declnode ast.Node, typ types.Type) {
 	normaldescr := true
-	
+
 	switch declnode := declnode.(type) {
 	case *ast.FuncDecl:
-		printFunc(out, pkg, declnode)
+		printFunc(out, declnode)
 		normaldescr = false
 	default:
 	}
-	
+
 	if normaldescr {
-		describeType(out, pkg, "type:", typ)
-		fmt.Fprintf(out, "\n")
-		fmt.Fprintf(out, "\n")
+		describeType(out, "type:", typ)
 	}
 }
 
-func printFunc(out io.Writer, pkg *packages.Package, declnode *ast.FuncDecl) {
+func printFunc(out io.Writer, declnode *ast.FuncDecl) {
 	body := declnode.Body
 	declnode.Body = nil
-	printer.Fprint(out, pkg.Fset, declnode)
+	printer.Fprint(out, getFileSet(declnode.Pos()), declnode)
 	fmt.Fprintf(out, "\n")
 	declnode.Body = body
 }
 
-func describeType(out io.Writer, pkg *packages.Package, prefix string, typ types.Type) {
+func describeType(out io.Writer, prefix string, typ types.Type) {
 	fmt.Fprintf(out, "%s %v\n", prefix, typ)
 	ntyp, isnamed := typ.(*types.Named)
 	if !isnamed {
@@ -329,7 +317,7 @@ func describeType(out io.Writer, pkg *packages.Package, prefix string, typ types
 	if obj == nil {
 		return
 	}
-	pos := pkg.Fset.Position(obj.Pos())
+	pos := getPosition(obj.Pos())
 	fmt.Fprintf(out, "\t%s:%d\n", pos.Filename, pos.Line)
 }
 
@@ -339,7 +327,7 @@ func findNodeInPackages(pkgs []*packages.Package, pkgpath string, pos token.Pos)
 		if pkg.PkgPath != pkgpath {
 			return true
 		}
-		
+
 		for i := range pkg.Syntax {
 			node := findDecl(pkg.Syntax[i], pos)
 			if node != nil {
@@ -352,7 +340,7 @@ func findNodeInPackages(pkgs []*packages.Package, pkgpath string, pos token.Pos)
 }
 
 func findDecl(root *ast.File, pos token.Pos) ast.Node {
-	v := &exactVisitorForDecl{ pos, nil  }
+	v := &exactVisitorForDecl{pos, nil}
 	ast.Walk(v, root)
 	return v.ret
 }
@@ -367,9 +355,13 @@ func (v *exactVisitorForDecl) Visit(node ast.Node) ast.Visitor {
 		return v
 	}
 	if v.pos >= node.Pos() && v.pos < node.End() {
-		switch node.(type) {
-		case *ast.GenDecl, *ast.FuncDecl, *ast.AssignStmt, *ast.DeclStmt:
+		switch node := node.(type) {
+		case *ast.GenDecl, *ast.AssignStmt, *ast.DeclStmt:
 			v.ret = node
+		case *ast.FuncDecl:
+			if v.pos == node.Name.Pos() {
+				v.ret = node
+			}
 		}
 	}
 	return v
