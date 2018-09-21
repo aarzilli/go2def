@@ -166,6 +166,7 @@ func TestNoexpansionDescribe(t *testing.T) {
 	t.Run("use-of-member-field", testDescribe("testfixture1/s.go", "g", "h", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\ntype: int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
 	t.Run("use-of-blank-member-field", testDescribe("testfixture1/s.go", "i", "j", nil, "receiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
 	t.Run("use-of-variable-with-type-in-other-package", testDescribe("testfixture1/f.go", "g", "h", nil, "type: testfixture2.Bstruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture2/f2.go:?\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/f.go:?\n"))
+	t.Run("call-to-iface-method-from-stdlib", testDescribe("testfixture1/s.go", "k", "l", nil, "method out.Write\nreceiver: io.Writer\n\t/usr/local/go-tip/src/io/io.go:90\ntype: func(p []byte) (n int, err error)\n\n/usr/local/go-tip/src/io/io.go:?\n"))
 }
 
 func TestExpansionDescribe(t *testing.T) {

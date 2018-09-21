@@ -172,15 +172,13 @@ func describeNode(ctx *context, pkg *packages.Package, node ast.Node) {
 		if declnode != nil {
 			describeDeclaration(ctx, declnode, obj.Type())
 
-			pos := ctx.getPosition(declnode.Pos())
-			fmt.Fprintf(ctx.Out, "\n%s:%d\n", pos.Filename, pos.Line)
+			printPos(ctx, "\n", ctx.getPosition(declnode.Pos()))
 
 		} else {
 			fmt.Fprintf(ctx.Out, "%s\n", obj)
 			describeType(ctx, "type:", obj.Type())
 
-			pos := ctx.getPosition(obj.Pos())
-			fmt.Fprintf(ctx.Out, "\n%s:%d\n", pos.Filename, pos.Line)
+			printPos(ctx, "\n", ctx.getPosition(obj.Pos()))
 
 		}
 
@@ -207,7 +205,9 @@ func describeNode(ctx *context, pkg *packages.Package, node ast.Node) {
 		fallbackdescr := true
 
 		declnode := findNodeInPackages(ctx, obj.Pkg().Path(), obj.Pos())
+		pos := ctx.getPosition(obj.Pos())
 		if declnode != nil {
+			pos = ctx.getPosition(declnode.Pos())
 			switch declnode := declnode.(type) {
 			case *ast.FuncDecl:
 				printFunc(ctx, declnode)
@@ -233,8 +233,7 @@ func describeNode(ctx *context, pkg *packages.Package, node ast.Node) {
 			describeType(ctx, "type:", sel.Type())
 		}
 
-		pos := ctx.getPosition(obj.Pos())
-		fmt.Fprintf(ctx.Out, "\n%s:%d\n", pos.Filename, pos.Line)
+		printPos(ctx, "\n", pos)
 
 	case ast.Expr:
 		typeAndVal := pkg.TypesInfo.Types[node]
@@ -279,7 +278,21 @@ func describeType(ctx *context, prefix string, typ types.Type) {
 		return
 	}
 	pos := ctx.getPosition(obj.Pos())
-	fmt.Fprintf(ctx.Out, "\t%s:%d\n", pos.Filename, pos.Line)
+	printPos(ctx, "\t", pos)
+}
+
+func printPos(ctx *context, prefix string, pos token.Position) {
+	filename := pos.Filename
+	filename = replaceGoroot(ctx, filename)
+	fmt.Fprintf(ctx.Out, "%s%s:%d\n", prefix, filename, pos.Line)
+}
+
+func replaceGoroot(ctx *context, filename string) string {
+	const gorootPrefix = "$GOROOT"
+	if strings.HasPrefix(filename, gorootPrefix) {
+		filename = ctx.Goroot() + filename[len(gorootPrefix):]
+	}
+	return filename
 }
 
 func describeTypeContents(out io.Writer, typ types.Type, prefix string) {
@@ -360,11 +373,7 @@ func findNodeInPackages(ctx *context, pkgpath string, pos token.Pos) ast.Node {
 
 			pkg = pkgs2[0]
 			p := pkg.Fset.Position(pos)
-			filename := p.Filename
-			const gorootPrefix = "$GOROOT"
-			if strings.HasPrefix(filename, gorootPrefix) {
-				filename = ctx.Goroot() + filename[len(gorootPrefix):]
-			}
+			filename := replaceGoroot(ctx, p.Filename)
 			//XXX: ideally we would look for pkg.Fset.File(pos).Offset(pos) instead but it seems to be wrong.
 			for i := range pkg.Syntax {
 				node := findDeclByLine(ctx, pkg.Syntax[i], filename, p.Line)
@@ -434,8 +443,10 @@ func (v *exactVisitorForFileLine) Visit(node ast.Node) ast.Visitor {
 	p := v.ctx.getPosition(node.Pos())
 	if v.filename == p.Filename && v.line == p.Line {
 		switch node := node.(type) {
-		case *ast.GenDecl, *ast.AssignStmt, *ast.DeclStmt, *ast.FuncDecl:
-			v.ret = node
+		case *ast.GenDecl, *ast.AssignStmt, *ast.DeclStmt, *ast.FuncDecl, *ast.Field:
+			if v.ret == nil {
+				v.ret = node
+			}
 		}
 	}
 	return v
