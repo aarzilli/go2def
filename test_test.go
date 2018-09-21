@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const quoted = false
+const quoted = true
 
 func must(err error) {
 	if err != nil {
@@ -219,5 +219,57 @@ func TestModified(t *testing.T) {
 	t.Run("call-to-func-in-same-file", testDescribe("testfixture1/f.go", "i", "", []modifyfn{insert("i", "callable2(b.Xmember)")}, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/callable2.go:?\n"))
 }
 
-//TODO:
-// - tests with go.mod
+func TestGoMod(t *testing.T) {
+	if os.TempDir() == "" {
+		panic("notmpdir")
+	}
+	tmpdir, err := ioutil.TempDir(os.TempDir(), "go2def-test-")
+	must(err)
+	defer safeRemoveAll(tmpdir)
+
+	ioutil.WriteFile(filepath.Join(tmpdir, "go.mod"), []byte("module testmodule\nrequire (\ngithub.com/aarzilli/go2def v0.0.0-20180921140844-57b3d798eea0\ngolang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e // indirect\n)\n\n"), 0666)
+
+	ioutil.WriteFile(filepath.Join(tmpdir, "t.go"), []byte(`package main
+
+import (
+	"github.com/aarzilli/go2def"
+)
+
+func main() {
+	/*c*/callable2/*d*/(2)
+	/*a*/go2def.Describe/*b*/("nonexistent.go:", [2]int{ 1, 1 }, nil)
+}`), 0666)
+
+	ioutil.WriteFile(filepath.Join(tmpdir, "f.go"), []byte(`package main
+
+func callable2(x int) {
+	println(x+2)
+}
+`), 0666)
+
+	t.Run("call-imported-function", testDescribe(filepath.Join(tmpdir, "t.go"), "a", "b", nil, "func Describe(path string, pos [2]int, cfg *Config)\n\n/home/a/n/go/pkg/mod/github.com/aarzilli/go2def@v0.0.0-20180921140844-57b3d798eea0/main.go:?\n"))
+	t.Run("call-function-in-other-file", testDescribe(filepath.Join(tmpdir, "t.go"), "c", "d", nil, "func callable2(x int)\n\n/tmp/go2def-test-?/f.go:?\n"))
+}
+
+func safeRemoveAll(dir string) {
+	dh, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	defer dh.Close()
+	fis, err := dh.Readdir(-1)
+	if err != nil {
+		return
+	}
+	for _, fi := range fis {
+		if fi.IsDir() {
+			return
+		}
+	}
+	for _, fi := range fis {
+		if err := os.Remove(filepath.Join(dir, fi.Name())); err != nil {
+			return
+		}
+	}
+	os.Remove(dir)
+}

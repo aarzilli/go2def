@@ -31,7 +31,7 @@ func (ctx *context) Goroot() string {
 type Config struct {
 	Out io.Writer // output writer, defaults to os.Stdout
 
-	Wd string // working directory, defaults to os current working directory
+	Wd string // working directory, defaults to path directory
 
 	Modfiles map[string][]byte // modified files
 
@@ -55,7 +55,8 @@ func Describe(path string, pos [2]int, cfg *Config) {
 		ctx.Config = *cfg
 	}
 	if ctx.Wd == "" {
-		ctx.Wd, _ = os.Getwd()
+		ctx.Wd = filepath.Dir(path)
+		path = filepath.Base(path)
 	}
 	if ctx.Out == nil {
 		ctx.Out = os.Stdout
