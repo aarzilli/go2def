@@ -1,15 +1,15 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"bufio"
+	"bytes"
+	"fmt"
 	"io"
 	"log"
-	"strings"
+	"os"
 	"strconv"
-	"bytes"
-	
+	"strings"
+
 	"github.com/aarzilli/go2def"
 )
 
@@ -66,8 +66,8 @@ func describe(out io.Writer, rd *bufio.Reader, args []string) {
 			modfiles = parseModified(modbuf)
 		}
 	}
-	
-	go2def.Describe(out, path, pos, modfiles)
+
+	go2def.Describe(path, pos, &go2def.Config{Out: out, Modfiles: modfiles})
 }
 
 func parseDescribeArgs(out io.Writer, argv []string) (modified bool, path string, pos [2]int, ok bool) {

@@ -17,71 +17,111 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const verbose = false
-const debugLoadPackages = false
-
-var goroot *string
-
-func Goroot() string {
-	if goroot != nil {
-		return *goroot
+func (ctx *context) Goroot() string {
+	if ctx.goroot != nil {
+		return *ctx.goroot
 	}
 
 	b, _ := exec.Command("go", "env", "GOROOT").CombinedOutput()
 	s := strings.TrimSpace(string(b))
-	goroot = &s
-	return *goroot
+	ctx.goroot = &s
+	return *ctx.goroot
 }
 
-func Describe(out io.Writer, path string, pos [2]int, modfiles map[string][]byte) {
-	pkgs, err := loadPackages(out, path, modfiles)
+type Config struct {
+	Out io.Writer // output writer, defaults to os.Stdout
+
+	Wd string // working directory, defaults to os current working directory
+
+	Modfiles map[string][]byte // modified files
+
+	Verbose           bool
+	DebugLoadPackages bool
+}
+
+type context struct {
+	Config
+	goroot *string
+
+	currentFileSet *token.FileSet
+
+	pkgs []*packages.Package
+}
+
+func Describe(path string, pos [2]int, cfg *Config) {
+	var ctx context
+
+	if cfg != nil {
+		ctx.Config = *cfg
+	}
+	if ctx.Wd == "" {
+		ctx.Wd, _ = os.Getwd()
+	}
+	if ctx.Out == nil {
+		ctx.Out = os.Stdout
+	}
+
+	err := loadPackages(&ctx, path)
 	if err != nil {
-		fmt.Fprintf(out, "loading packages: %v", err)
+		fmt.Fprintf(cfg.Out, "loading packages: %v", err)
 		return
 	}
 
-	if verbose && debugLoadPackages {
-		packages.Visit(pkgs, func(pkg *packages.Package) bool {
+	if cfg.Verbose && cfg.DebugLoadPackages {
+		packages.Visit(ctx.pkgs, func(pkg *packages.Package) bool {
 			log.Printf("package %v\n", pkg)
 			return true
 		}, nil)
 	}
 
-	packages.Visit(pkgs, func(pkg *packages.Package) bool {
+	found := false
+	packages.Visit(ctx.pkgs, func(pkg *packages.Package) bool {
 		for i := range pkg.Syntax {
 			//TODO: better way to match file?
 			if strings.HasSuffix(pkg.CompiledGoFiles[i], path) {
 				node := findNodeInFile(pkg, pkg.Syntax[i], pos, pos[0] == pos[1])
 				if node != nil {
-					describeNode(out, pkg, pkgs, node)
+					found = true
+					describeNode(&ctx, pkg, node)
 				}
 				break
 			}
 		}
 		return true
 	}, nil)
+
+	if !found {
+		fmt.Fprintf(ctx.Out, "nothing found\n")
+	}
 }
 
-var currentFileSet *token.FileSet
-
-func getPosition(pos token.Pos) token.Position {
-	return currentFileSet.Position(pos)
+func (ctx *context) getPosition(pos token.Pos) token.Position {
+	return ctx.currentFileSet.Position(pos)
 }
 
-func getFileSet(pos token.Pos) *token.FileSet {
-	return currentFileSet
+func (ctx *context) getFileSet(pos token.Pos) *token.FileSet {
+	return ctx.currentFileSet
 }
 
-func loadPackages(out io.Writer, path string, modfiles map[string][]byte) ([]*packages.Package, error) {
-	var parseFile func(*token.FileSet, string) (*ast.File, error)
-	if modfiles != nil {
-		parseFile = func(fset *token.FileSet, name string) (*ast.File, error) {
-			return parser.ParseFile(fset, name, modfiles[name], parser.ParseComments)
+func (ctx *context) parseFile() func(*token.FileSet, string) (*ast.File, error) {
+	if ctx.Modfiles == nil {
+		return nil
+	}
+
+	return func(fset *token.FileSet, name string) (*ast.File, error) {
+		if buf, modified := ctx.Modfiles[name]; modified {
+			return parser.ParseFile(fset, name, buf, parser.ParseComments)
+		} else {
+			return parser.ParseFile(fset, name, nil, parser.ParseComments)
 		}
 	}
-	currentFileSet = token.NewFileSet()
-	wd, _ := os.Getwd()
-	return packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: wd, Fset: currentFileSet, ParseFile: parseFile}, filepath.Dir(path))
+}
+
+func loadPackages(ctx *context, path string) error {
+	ctx.currentFileSet = token.NewFileSet()
+	var err error
+	ctx.pkgs, err = packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: ctx.Wd, Fset: ctx.currentFileSet, ParseFile: ctx.parseFile()}, filepath.Dir(path))
+	return err
 }
 
 func findNodeInFile(pkg *packages.Package, root *ast.File, pos [2]int, autoexpand bool) ast.Node {
@@ -114,32 +154,32 @@ func (v *exactVisitor) Visit(node ast.Node) ast.Visitor {
 	return v
 }
 
-func describeNode(out io.Writer, pkg *packages.Package, pkgs []*packages.Package, node ast.Node) {
+func describeNode(ctx *context, pkg *packages.Package, node ast.Node) {
 	switch node := node.(type) {
 	case *ast.Ident:
 		obj := pkg.TypesInfo.Uses[node]
 		if obj == nil {
-			fmt.Fprintf(out, "unknown identifier %v\n", node)
+			fmt.Fprintf(ctx.Out, "unknown identifier %v\n", node)
 			return
 		}
 
-		declnode := findNodeInPackages(pkgs, obj.Pkg().Path(), obj.Pos())
-		if verbose {
+		declnode := findNodeInPackages(ctx, obj.Pkg().Path(), obj.Pos())
+		if ctx.Verbose {
 			log.Printf("declaration node %v\n", declnode)
 		}
 
 		if declnode != nil {
-			describeDeclaration(out, declnode, obj.Type())
+			describeDeclaration(ctx, declnode, obj.Type())
 
-			pos := getPosition(declnode.Pos())
-			fmt.Fprintf(out, "\n%s:%d\n", pos.Filename, pos.Line)
+			pos := ctx.getPosition(declnode.Pos())
+			fmt.Fprintf(ctx.Out, "\n%s:%d\n", pos.Filename, pos.Line)
 
 		} else {
-			fmt.Fprintf(out, "%s\n", obj)
-			describeType(out, "type:", obj.Type())
+			fmt.Fprintf(ctx.Out, "%s\n", obj)
+			describeType(ctx, "type:", obj.Type())
 
-			pos := getPosition(obj.Pos())
-			fmt.Fprintf(out, "\n%s:%d\n", pos.Filename, pos.Line)
+			pos := ctx.getPosition(obj.Pos())
+			fmt.Fprintf(ctx.Out, "\n%s:%d\n", pos.Filename, pos.Line)
 
 		}
 
@@ -147,18 +187,17 @@ func describeNode(out io.Writer, pkg *packages.Package, pkgs []*packages.Package
 		sel := pkg.TypesInfo.Selections[node]
 		if sel == nil {
 			if idobj := pkg.TypesInfo.Uses[node.Sel]; idobj != nil {
-				describeNode(out, pkg, pkgs, node.Sel)
+				describeNode(ctx, pkg, node.Sel)
 				return
 			}
 			if typeOfExpr := pkg.TypesInfo.Types[node.X]; typeOfExpr.Type != nil {
-				typeAndVal := pkg.TypesInfo.Types[node]
-				describeType(out, "receiver:", typeAndVal.Type)
-				describeTypeContents(out, typeAndVal.Type, node.Sel.String())
+				describeType(ctx, "receiver:", typeOfExpr.Type)
+				describeTypeContents(ctx.Out, typeOfExpr.Type, node.Sel.String())
 				return
 			}
-			fmt.Fprintf(out, "unknown selector expression ")
-			printer.Fprint(out, getFileSet(node.Pos()), node)
-			fmt.Fprintf(out, "\n")
+			fmt.Fprintf(ctx.Out, "unknown selector expression ")
+			printer.Fprint(ctx.Out, ctx.getFileSet(node.Pos()), node)
+			fmt.Fprintf(ctx.Out, "\n")
 			return
 		}
 
@@ -166,11 +205,11 @@ func describeNode(out io.Writer, pkg *packages.Package, pkgs []*packages.Package
 
 		fallbackdescr := true
 
-		declnode := findNodeInPackages(pkgs, obj.Pkg().Path(), obj.Pos())
+		declnode := findNodeInPackages(ctx, obj.Pkg().Path(), obj.Pos())
 		if declnode != nil {
 			switch declnode := declnode.(type) {
 			case *ast.FuncDecl:
-				printFunc(out, declnode)
+				printFunc(ctx, declnode)
 				fallbackdescr = false
 			}
 		}
@@ -178,55 +217,58 @@ func describeNode(out io.Writer, pkg *packages.Package, pkgs []*packages.Package
 		if fallbackdescr {
 			switch sel.Kind() {
 			case types.FieldVal:
-				fmt.Fprintf(out, "struct field ")
+				fmt.Fprintf(ctx.Out, "struct field ")
 			case types.MethodVal:
-				fmt.Fprintf(out, "method ")
+				fmt.Fprintf(ctx.Out, "method ")
 			case types.MethodExpr:
-				fmt.Fprintf(out, "method expression ")
+				fmt.Fprintf(ctx.Out, "method expression ")
 			default:
-				fmt.Fprintf(out, "unknown selector ")
+				fmt.Fprintf(ctx.Out, "unknown selector ")
 			}
 
-			printer.Fprint(out, getFileSet(node.Pos()), node)
-			fmt.Fprintf(out, "\n")
-			describeType(out, "receiver:", sel.Recv())
-			describeType(out, "type:", sel.Type())
+			printer.Fprint(ctx.Out, ctx.getFileSet(node.Pos()), node)
+			fmt.Fprintf(ctx.Out, "\n")
+			describeType(ctx, "receiver:", sel.Recv())
+			describeType(ctx, "type:", sel.Type())
 		}
 
-		pos := getPosition(obj.Pos())
-		fmt.Fprintf(out, "\n%s:%d\n", pos.Filename, pos.Line)
+		pos := ctx.getPosition(obj.Pos())
+		fmt.Fprintf(ctx.Out, "\n%s:%d\n", pos.Filename, pos.Line)
 
 	case ast.Expr:
 		typeAndVal := pkg.TypesInfo.Types[node]
-		describeType(out, "type:", typeAndVal.Type)
+		describeType(ctx, "type:", typeAndVal.Type)
 	}
 }
 
-func describeDeclaration(out io.Writer, declnode ast.Node, typ types.Type) {
+func describeDeclaration(ctx *context, declnode ast.Node, typ types.Type) {
 	normaldescr := true
 
 	switch declnode := declnode.(type) {
 	case *ast.FuncDecl:
-		printFunc(out, declnode)
+		printFunc(ctx, declnode)
 		normaldescr = false
 	default:
 	}
 
 	if normaldescr {
-		describeType(out, "type:", typ)
+		describeType(ctx, "type:", typ)
 	}
 }
 
-func printFunc(out io.Writer, declnode *ast.FuncDecl) {
+func printFunc(ctx *context, declnode *ast.FuncDecl) {
 	body := declnode.Body
 	declnode.Body = nil
-	printer.Fprint(out, getFileSet(declnode.Pos()), declnode)
-	fmt.Fprintf(out, "\n")
+	printer.Fprint(ctx.Out, ctx.getFileSet(declnode.Pos()), declnode)
+	fmt.Fprintf(ctx.Out, "\n")
 	declnode.Body = body
 }
 
-func describeType(out io.Writer, prefix string, typ types.Type) {
-	fmt.Fprintf(out, "%s %v\n", prefix, typ)
+func describeType(ctx *context, prefix string, typ types.Type) {
+	fmt.Fprintf(ctx.Out, "%s %s\n", prefix, printTypesTypeNice(typ))
+	if ptyp, isptr := typ.(*types.Pointer); isptr {
+		typ = ptyp.Elem()
+	}
 	ntyp, isnamed := typ.(*types.Named)
 	if !isnamed {
 		return
@@ -235,50 +277,70 @@ func describeType(out io.Writer, prefix string, typ types.Type) {
 	if obj == nil {
 		return
 	}
-	pos := getPosition(obj.Pos())
-	fmt.Fprintf(out, "\t%s:%d\n", pos.Filename, pos.Line)
+	pos := ctx.getPosition(obj.Pos())
+	fmt.Fprintf(ctx.Out, "\t%s:%d\n", pos.Filename, pos.Line)
 }
 
 func describeTypeContents(out io.Writer, typ types.Type, prefix string) {
+	if prefix == "_" {
+		prefix = ""
+	}
+	if ptyp, isptr := typ.(*types.Pointer); isptr {
+		typ = ptyp.Elem()
+	}
+
 	switch styp := typ.(type) {
 	case *types.Named:
-		if styp.NumMethods() > 0 {
+		typ = styp.Underlying()
+		ms := []*types.Func{}
+		for i := 0; i < styp.NumMethods(); i++ {
+			m := styp.Method(i)
+			if strings.HasPrefix(m.Name(), prefix) {
+				ms = append(ms, m)
+			}
+		}
+		if len(ms) > 0 {
 			fmt.Fprintf(out, "\nMethods:\n")
-			for i := 0; i < styp.NumMethods(); i++ {
-				m := styp.Method(i)
-				if strings.HasPrefix(m.Name(), prefix) {
-					fmt.Fprintf(out, "\t%s\n", m)
-				}
+			for _, m := range ms {
+				fmt.Fprintf(out, "\t%s\n", printTypesObjectNice(m))
 			}
 		}
 	case *types.Interface:
-		if styp.NumMethods() > 0 {
+		ms := []*types.Func{}
+		for i := 0; i < styp.NumMethods(); i++ {
+			m := styp.Method(i)
+			if strings.HasPrefix(m.Name(), prefix) {
+				ms = append(ms, m)
+			}
+		}
+		if len(ms) > 0 {
 			fmt.Fprintf(out, "\nMethods:\n")
-			for i := 0; i < styp.NumMethods(); i++ {
-				m := styp.Method(i)
-				if strings.HasPrefix(m.Name(), prefix) {
-					fmt.Fprintf(out, "\t%s\n", m)
-				}
+			for _, m := range ms {
+				fmt.Fprintf(out, "\t%s\n", printTypesObjectNice(m))
 			}
 		}
 	}
 
 	if typ, isstruct := typ.(*types.Struct); isstruct {
-		if typ.NumFields() > 0 {
+		fs := []*types.Var{}
+		for i := 0; i < typ.NumFields(); i++ {
+			f := typ.Field(i)
+			if strings.HasPrefix(f.Name(), prefix) {
+				fs = append(fs, f)
+			}
+		}
+		if len(fs) > 0 {
 			fmt.Fprintf(out, "\nFields:\n")
-			for i := 0; i < typ.NumFields(); i++ {
-				f := typ.Field(i)
-				if strings.HasPrefix(f.Name(), prefix) {
-					fmt.Fprintf(out, "\t%s\n", f)
-				}
+			for _, f := range fs {
+				fmt.Fprintf(out, "\t%s\n", printTypesObjectNice(f))
 			}
 		}
 	}
 }
 
-func findNodeInPackages(pkgs []*packages.Package, pkgpath string, pos token.Pos) ast.Node {
+func findNodeInPackages(ctx *context, pkgpath string, pos token.Pos) ast.Node {
 	var r ast.Node
-	packages.Visit(pkgs, func(pkg *packages.Package) bool {
+	packages.Visit(ctx.pkgs, func(pkg *packages.Package) bool {
 		if r != nil {
 			return false
 		}
@@ -287,11 +349,10 @@ func findNodeInPackages(pkgs []*packages.Package, pkgpath string, pos token.Pos)
 		}
 
 		if pkg.Syntax == nil {
-			if verbose {
+			if ctx.Verbose {
 				log.Printf("loading syntax for %q", pkg.PkgPath)
 			}
-			wd, _ := os.Getwd()
-			pkgs2, err := packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: wd, Fset: pkg.Fset}, pkg.PkgPath)
+			pkgs2, err := packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: ctx.Wd, Fset: pkg.Fset, ParseFile: ctx.parseFile()}, pkg.PkgPath)
 			if err != nil {
 				return true
 			}
@@ -301,11 +362,11 @@ func findNodeInPackages(pkgs []*packages.Package, pkgpath string, pos token.Pos)
 			filename := p.Filename
 			const gorootPrefix = "$GOROOT"
 			if strings.HasPrefix(filename, gorootPrefix) {
-				filename = Goroot() + filename[len(gorootPrefix):]
+				filename = ctx.Goroot() + filename[len(gorootPrefix):]
 			}
 			//XXX: ideally we would look for pkg.Fset.File(pos).Offset(pos) instead but it seems to be wrong.
 			for i := range pkg.Syntax {
-				node := findDeclByLine(pkg.Syntax[i], filename, p.Line)
+				node := findDeclByLine(ctx, pkg.Syntax[i], filename, p.Line)
 				if node != nil {
 					r = node
 				}
@@ -352,13 +413,14 @@ func (v *exactVisitorForDecl) Visit(node ast.Node) ast.Visitor {
 	return v
 }
 
-func findDeclByLine(root *ast.File, filename string, line int) ast.Node {
-	v := &exactVisitorForFileLine{filename, line, nil}
+func findDeclByLine(ctx *context, root *ast.File, filename string, line int) ast.Node {
+	v := &exactVisitorForFileLine{ctx, filename, line, nil}
 	ast.Walk(v, root)
 	return v.ret
 }
 
 type exactVisitorForFileLine struct {
+	ctx      *context
 	filename string
 	line     int
 	ret      ast.Node
@@ -368,7 +430,7 @@ func (v *exactVisitorForFileLine) Visit(node ast.Node) ast.Visitor {
 	if node == nil {
 		return v
 	}
-	p := getPosition(node.Pos())
+	p := v.ctx.getPosition(node.Pos())
 	if v.filename == p.Filename && v.line == p.Line {
 		switch node := node.(type) {
 		case *ast.GenDecl, *ast.AssignStmt, *ast.DeclStmt, *ast.FuncDecl:
@@ -376,4 +438,16 @@ func (v *exactVisitorForFileLine) Visit(node ast.Node) ast.Visitor {
 		}
 	}
 	return v
+}
+
+func printTypesObjectNice(v types.Object) string {
+	return types.ObjectString(v, func(pkg *types.Package) string {
+		return pkg.Name()
+	})
+}
+
+func printTypesTypeNice(t types.Type) string {
+	return types.TypeString(t, func(pkg *types.Package) string {
+		return pkg.Name()
+	})
 }
