@@ -56,7 +56,6 @@ func Describe(path string, pos [2]int, cfg *Config) {
 	}
 	if ctx.Wd == "" {
 		ctx.Wd = filepath.Dir(path)
-		path = filepath.Base(path)
 	}
 	if ctx.Out == nil {
 		ctx.Out = os.Stdout
@@ -121,7 +120,7 @@ func (ctx *context) parseFile() func(*token.FileSet, string) (*ast.File, error) 
 func loadPackages(ctx *context, path string) error {
 	ctx.currentFileSet = token.NewFileSet()
 	var err error
-	ctx.pkgs, err = packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: ctx.Wd, Fset: ctx.currentFileSet, ParseFile: ctx.parseFile()}, filepath.Dir(path))
+	ctx.pkgs, err = packages.Load(&packages.Config{Mode: packages.LoadSyntax, Dir: ctx.Wd, Fset: ctx.currentFileSet, ParseFile: ctx.parseFile()}, "contains:"+path)
 	return err
 }
 
