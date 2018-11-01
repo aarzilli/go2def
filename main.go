@@ -103,16 +103,16 @@ func (ctx *context) getFileSet(pos token.Pos) *token.FileSet {
 	return ctx.currentFileSet
 }
 
-func (ctx *context) parseFile() func(*token.FileSet, string) (*ast.File, error) {
+func (ctx *context) parseFile() func(*token.FileSet, string, []byte) (*ast.File, error) {
 	if ctx.Modfiles == nil {
 		return nil
 	}
 
-	return func(fset *token.FileSet, name string) (*ast.File, error) {
+	return func(fset *token.FileSet, name string, obuf []byte) (*ast.File, error) {
 		if buf, modified := ctx.Modfiles[name]; modified {
 			return parser.ParseFile(fset, name, buf, parser.ParseComments)
 		} else {
-			return parser.ParseFile(fset, name, nil, parser.ParseComments)
+			return parser.ParseFile(fset, name, obuf, parser.ParseComments)
 		}
 	}
 }
