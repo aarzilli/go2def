@@ -252,6 +252,12 @@ func callable2(x int) {
 	t.Run("call-function-in-other-file", testDescribe(filepath.Join(tmpdir, "t.go"), "c", "d", nil, "func callable2(x int)\n\n/tmp/go2def-test-?/f.go:?\n"))
 }
 
+func TestTests(t *testing.T) {
+	t.Run("run-inside-test-1", testDescribe("testfixture1/testfixture1_test.go", "a", "b", nil, "// Fatalf is equivalent to Logf followed by FailNow.\nfunc (c *common) Fatalf(format string, args ...interface{})\n\n/usr/local/go/src/testing/testing.go:655\n"))
+	t.Run("run-inside-test-2", testDescribe("testfixture1/testfixture1_test.go", "c", "d", nil, "func somefn()\n\n/home/a/n/go2def/internal/testfixture1/testfixture1_test.go:5\n"))
+
+}
+
 func safeRemoveAll(dir string) {
 	dh, err := os.Open(dir)
 	if err != nil {
