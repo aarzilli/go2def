@@ -103,6 +103,8 @@ func testDescribe(path string, start, end string, modify []modifyfn, tgt string)
 		Describe(path, pos, cfg)
 		outs := out.String()
 
+		tgt = strings.Replace(tgt, "$INTERNAL", filepath.Join(wd, "internal"), -1)
+
 		if !wildmatch(tgt, outs) {
 			t.Errorf("output mismatch")
 		}
@@ -156,68 +158,73 @@ func insert(expr string, ins string) func(s string) string {
 	}
 }
 
+func TestMain(m *testing.M) {
+	os.Setenv("GOFLAGS", "") // -mod=vendor can break all tests
+	os.Exit(m.Run())
+}
+
 func TestNoexpansionDescribe(t *testing.T) {
-	t.Run("call-to-func-in-same-file", testDescribe("testfixture1/f.go", "a", "b", nil, "func callable(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/f.go:?\n"))
-	t.Run("call-to-func-in-different-file", testDescribe("testfixture1/f.go", "c", "d", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/callable2.go:?\n"))
-	t.Run("call-to-func-in-different-package", testDescribe("testfixture1/f.go", "e", "f", nil, "func Callable3(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture2/f2.go:?\n"))
-	t.Run("call-to-method", testDescribe("testfixture1/s.go", "a", "b", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	t.Run("call-with-package-selector", testDescribe("testfixture1/s.go", "c", "d", nil, "// Atoi returns the result of ParseInt(s, 10, 0) converted to type int.\nfunc Atoi(s string) (int, error)\n\n/usr/local/go-tip/src/strconv/atoi.go:?\n"))
-	t.Run("use-of-local-var", testDescribe("testfixture1/s.go", "e", "f", nil, "type: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	t.Run("use-of-member-field", testDescribe("testfixture1/s.go", "g", "h", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\ntype: int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	t.Run("use-of-blank-member-field", testDescribe("testfixture1/s.go", "i", "j", nil, "receiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
-	t.Run("use-of-variable-with-type-in-other-package", testDescribe("testfixture1/f.go", "g", "h", nil, "type: testfixture2.Bstruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture2/f2.go:?\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/f.go:?\n"))
-	t.Run("call-to-iface-method-from-stdlib", testDescribe("testfixture1/s.go", "k", "l", nil, "method out.Write\nreceiver: io.Writer\n\t/usr/local/go-tip/src/io/io.go:90\ntype: func(p []byte) (n int, err error)\n\n/usr/local/go-tip/src/io/io.go:?\n"))
+	t.Run("call-to-func-in-same-file", testDescribe("testfixture1/f.go", "a", "b", nil, "func callable(x int) int\n\n$INTERNAL/testfixture1/f.go:?\n"))
+	t.Run("call-to-func-in-different-file", testDescribe("testfixture1/f.go", "c", "d", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n$INTERNAL/testfixture1/callable2.go:?\n"))
+	t.Run("call-to-func-in-different-package", testDescribe("testfixture1/f.go", "e", "f", nil, "func Callable3(x int) int\n\n$INTERNAL/testfixture2/f2.go:?\n"))
+	t.Run("call-to-method", testDescribe("testfixture1/s.go", "a", "b", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	t.Run("call-with-package-selector", testDescribe("testfixture1/s.go", "c", "d", nil, "// Atoi is equivalent to ParseInt(s, 10, 0), converted to type int.\nfunc Atoi(s string) (int, error)\n\n/usr/local/go/src/strconv/atoi.go:?\n"))
+	t.Run("use-of-local-var", testDescribe("testfixture1/s.go", "e", "f", nil, "type: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	t.Run("use-of-member-field", testDescribe("testfixture1/s.go", "g", "h", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\ntype: int\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	t.Run("use-of-blank-member-field", testDescribe("testfixture1/s.go", "i", "j", nil, "receiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
+	t.Run("use-of-variable-with-type-in-other-package", testDescribe("testfixture1/f.go", "g", "h", nil, "type: testfixture2.Bstruct\n\t$INTERNAL/testfixture2/f2.go:?\n\n$INTERNAL/testfixture1/f.go:?\n"))
+	t.Run("call-to-iface-method-from-stdlib", testDescribe("testfixture1/s.go", "k", "l", nil, "method out.Write\nreceiver: io.Writer\n\t/usr/local/go/src/io/io.go:?\ntype: func(p []byte) (n int, err error)\n\n/usr/local/go/src/io/io.go:?\n"))
 }
 
 func TestExpansionDescribe(t *testing.T) {
 	// some tests are disabled because we only check if the cursor is at the start or end of the token, not in the middle.
 
-	t.Run("call-to-func-in-same-file-exp-1", testDescribe("testfixture1/f.go", "a", "", nil, "func callable(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/f.go:?\n"))
-	//t.Run("call-to-func-in-same-file-exp-2", testDescribe("testfixture1/f.go", "a+1", "", nil, "func callable(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/f.go:?\n"))
-	t.Run("call-to-func-in-same-file-exp-3", testDescribe("testfixture1/f.go", "b-0", "", nil, "func callable(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/f.go:?\n"))
-	//t.Run("call-to-func-in-same-file-exp-4", testDescribe("testfixture1/f.go", "b-1", "", nil, "func callable(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/f.go:?\n"))
+	t.Run("call-to-func-in-same-file-exp-1", testDescribe("testfixture1/f.go", "a", "", nil, "func callable(x int) int\n\n$INTERNAL/testfixture1/f.go:?\n"))
+	//t.Run("call-to-func-in-same-file-exp-2", testDescribe("testfixture1/f.go", "a+1", "", nil, "func callable(x int) int\n\n$INTERNAL/testfixture1/f.go:?\n"))
+	t.Run("call-to-func-in-same-file-exp-3", testDescribe("testfixture1/f.go", "b-0", "", nil, "func callable(x int) int\n\n$INTERNAL/testfixture1/f.go:?\n"))
+	//t.Run("call-to-func-in-same-file-exp-4", testDescribe("testfixture1/f.go", "b-1", "", nil, "func callable(x int) int\n\n$INTERNAL/testfixture1/f.go:?\n"))
 
-	t.Run("call-to-func-in-different-file-1", testDescribe("testfixture1/f.go", "c", "", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/callable2.go:?\n"))
-	//t.Run("call-to-func-in-different-file-2", testDescribe("testfixture1/f.go", "c+1", "", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/callable2.go:?\n"))
-	t.Run("call-to-func-in-different-file-3", testDescribe("testfixture1/f.go", "d-0", "", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/callable2.go:?\n"))
-	//t.Run("call-to-func-in-different-file-4", testDescribe("testfixture1/f.go", "d-1", "", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/callable2.go:?\n"))
+	t.Run("call-to-func-in-different-file-1", testDescribe("testfixture1/f.go", "c", "", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n$INTERNAL/testfixture1/callable2.go:?\n"))
+	//t.Run("call-to-func-in-different-file-2", testDescribe("testfixture1/f.go", "c+1", "", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n$INTERNAL/testfixture1/callable2.go:?\n"))
+	t.Run("call-to-func-in-different-file-3", testDescribe("testfixture1/f.go", "d-0", "", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n$INTERNAL/testfixture1/callable2.go:?\n"))
+	//t.Run("call-to-func-in-different-file-4", testDescribe("testfixture1/f.go", "d-1", "", nil, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n$INTERNAL/testfixture1/callable2.go:?\n"))
 
-	t.Run("call-to-func-in-different-package-1", testDescribe("testfixture1/f.go", "e", "", nil, "func Callable3(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture2/f2.go:?\n"))
-	//t.Run("call-to-func-in-different-package-2", testDescribe("testfixture1/f.go", "e+1", "", nil, "func Callable3(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture2/f2.go:?\n"))
-	t.Run("call-to-func-in-different-package-3", testDescribe("testfixture1/f.go", "f-0", "", nil, "func Callable3(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture2/f2.go:?\n"))
-	//t.Run("call-to-func-in-different-package-4", testDescribe("testfixture1/f.go", "f-1", "", nil, "func Callable3(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture2/f2.go:?\n"))
+	t.Run("call-to-func-in-different-package-1", testDescribe("testfixture1/f.go", "e", "", nil, "func Callable3(x int) int\n\n$INTERNAL/testfixture2/f2.go:?\n"))
+	//t.Run("call-to-func-in-different-package-2", testDescribe("testfixture1/f.go", "e+1", "", nil, "func Callable3(x int) int\n\n$INTERNAL/testfixture2/f2.go:?\n"))
+	t.Run("call-to-func-in-different-package-3", testDescribe("testfixture1/f.go", "f-0", "", nil, "func Callable3(x int) int\n\n$INTERNAL/testfixture2/f2.go:?\n"))
+	//t.Run("call-to-func-in-different-package-4", testDescribe("testfixture1/f.go", "f-1", "", nil, "func Callable3(x int) int\n\n$INTERNAL/testfixture2/f2.go:?\n"))
 
-	t.Run("call-to-method-1", testDescribe("testfixture1/s.go", "a", "", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	//t.Run("call-to-method-2", testDescribe("testfixture1/s.go", "a+1", "", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	t.Run("call-to-method-3", testDescribe("testfixture1/s.go", "b-0", "", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	//t.Run("call-to-method-4", testDescribe("testfixture1/s.go", "b-1", "", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
+	t.Run("call-to-method-1", testDescribe("testfixture1/s.go", "a", "", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	//t.Run("call-to-method-2", testDescribe("testfixture1/s.go", "a+1", "", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	t.Run("call-to-method-3", testDescribe("testfixture1/s.go", "b-0", "", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	//t.Run("call-to-method-4", testDescribe("testfixture1/s.go", "b-1", "", nil, "func (a *Astruct) Method2(b *Astruct) int\n\n$INTERNAL/testfixture1/s.go:?\n"))
 
-	t.Run("call-with-package-selector-1", testDescribe("testfixture1/s.go", "c", "", nil, "// Atoi returns the result of ParseInt(s, 10, 0) converted to type int.\nfunc Atoi(s string) (int, error)\n\n/usr/local/go-tip/src/strconv/atoi.go:?\n"))
+	t.Run("call-with-package-selector-1", testDescribe("testfixture1/s.go", "c", "", nil, "// Atoi is equivalent to ParseInt(s, 10, 0), converted to type int.\nfunc Atoi(s string) (int, error)\n\n/usr/local/go/src/strconv/atoi.go:?\n"))
 	//t.Run("call-with-package-selector-2", testDescribe("testfixture1/s.go", "c+1", "", nil, "// Atoi returns the result of ParseInt(s, 10, 0) converted to type int.\nfunc Atoi(s string) (int, error)\n\n/usr/local/go-tip/src/strconv/atoi.go:?\n"))
-	t.Run("call-with-package-selector-3", testDescribe("testfixture1/s.go", "d-0", "", nil, "// Atoi returns the result of ParseInt(s, 10, 0) converted to type int.\nfunc Atoi(s string) (int, error)\n\n/usr/local/go-tip/src/strconv/atoi.go:?\n"))
+	t.Run("call-with-package-selector-3", testDescribe("testfixture1/s.go", "d-0", "", nil, "// Atoi is equivalent to ParseInt(s, 10, 0), converted to type int.\nfunc Atoi(s string) (int, error)\n\n/usr/local/go/src/strconv/atoi.go:?\n"))
 	//t.Run("call-with-package-selector-4", testDescribe("testfixture1/s.go", "d-1", "", nil, "// Atoi returns the result of ParseInt(s, 10, 0) converted to type int.\nfunc Atoi(s string) (int, error)\n\n/usr/local/go-tip/src/strconv/atoi.go:?\n"))
 
-	t.Run("use-of-local-var-1", testDescribe("testfixture1/s.go", "e", "", nil, "type: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	//t.Run("use-of-local-var-2", testDescribe("testfixture1/s.go", "e+1", "", nil, "type: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	t.Run("use-of-local-var-3", testDescribe("testfixture1/s.go", "f-0", "", nil, "type: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	//t.Run("use-of-local-var-4", testDescribe("testfixture1/s.go", "f-1", "", nil, "type: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
+	t.Run("use-of-local-var-1", testDescribe("testfixture1/s.go", "e", "", nil, "type: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	//t.Run("use-of-local-var-2", testDescribe("testfixture1/s.go", "e+1", "", nil, "type: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	t.Run("use-of-local-var-3", testDescribe("testfixture1/s.go", "f-0", "", nil, "type: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	//t.Run("use-of-local-var-4", testDescribe("testfixture1/s.go", "f-1", "", nil, "type: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\n$INTERNAL/testfixture1/s.go:?\n"))
 
-	t.Run("use-of-member-field-1", testDescribe("testfixture1/s.go", "g", "", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\ntype: int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	//t.Run("use-of-member-field-2", testDescribe("testfixture1/s.go", "g+1", "", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\ntype: int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	t.Run("use-of-member-field-3", testDescribe("testfixture1/s.go", "h-0", "", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\ntype: int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
-	//t.Run("use-of-member-field-4", testDescribe("testfixture1/s.go", "h-1", "", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\ntype: int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n"))
+	t.Run("use-of-member-field-1", testDescribe("testfixture1/s.go", "g", "", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\ntype: int\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	//t.Run("use-of-member-field-2", testDescribe("testfixture1/s.go", "g+1", "", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\ntype: int\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	t.Run("use-of-member-field-3", testDescribe("testfixture1/s.go", "h-0", "", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\ntype: int\n\n$INTERNAL/testfixture1/s.go:?\n"))
+	//t.Run("use-of-member-field-4", testDescribe("testfixture1/s.go", "h-1", "", nil, "struct field a.Xmember\nreceiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\ntype: int\n\n$INTERNAL/testfixture1/s.go:?\n"))
 
-	t.Run("use-of-blank-member-field-1", testDescribe("testfixture1/s.go", "i", "", nil, "receiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
-	//t.Run("use-of-blank-member-field-2", testDescribe("testfixture1/s.go", "i+1", "", nil, "receiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
-	t.Run("use-of-blank-member-field-3", testDescribe("testfixture1/s.go", "j-0", "", nil, "receiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
-	//t.Run("use-of-blank-member-field-4", testDescribe("testfixture1/s.go", "j-1", "", nil, "receiver: *testfixture1.Astruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
+	t.Run("use-of-blank-member-field-1", testDescribe("testfixture1/s.go", "i", "", nil, "receiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
+	//t.Run("use-of-blank-member-field-2", testDescribe("testfixture1/s.go", "i+1", "", nil, "receiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
+	t.Run("use-of-blank-member-field-3", testDescribe("testfixture1/s.go", "j-0", "", nil, "receiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
+	//t.Run("use-of-blank-member-field-4", testDescribe("testfixture1/s.go", "j-1", "", nil, "receiver: *testfixture1.Astruct\n\t$INTERNAL/testfixture1/s.go:?\n\nMethods:\n\tfunc (*testfixture1.Astruct).Method1(x int) int\n\tfunc (*testfixture1.Astruct).Method2(b *testfixture1.Astruct) int\n\nFields:\n\tfield Xmember int\n\tfield Ymember int\n"))
 
-	t.Run("use-of-variable-with-type-in-other-package-3", testDescribe("testfixture1/f.go", "h-0", "", nil, "type: testfixture2.Bstruct\n\t/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture2/f2.go:?\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/f.go:?\n"))
+	t.Run("use-of-variable-with-type-in-other-package-3", testDescribe("testfixture1/f.go", "h-0", "", nil, "type: testfixture2.Bstruct\n\t$INTERNAL/testfixture2/f2.go:?\n\n$INTERNAL/testfixture1/f.go:?\n"))
 }
 
 func TestModified(t *testing.T) {
 	t.Run("call-to-func-in-same-file", testDescribe("testfixture1/f.go", "i", "", nil, "nothing found\n"))
-	t.Run("call-to-func-in-same-file", testDescribe("testfixture1/f.go", "i", "", []modifyfn{insert("i", "callable2(b.Xmember)")}, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n/home/a/n/go/src/github.com/aarzilli/go2def/internal/testfixture1/callable2.go:?\n"))
+	t.Run("call-to-func-in-same-file", testDescribe("testfixture1/f.go", "i", "", []modifyfn{insert("i", "callable2(b.Xmember)")}, "// callable2 is a blah blah blah\nfunc callable2(x int) int\n\n$INTERNAL/testfixture1/callable2.go:?\n"))
 }
 
 func TestGoMod(t *testing.T) {
@@ -253,7 +260,7 @@ func callable2(x int) {
 }
 
 func TestTests(t *testing.T) {
-	t.Run("run-inside-test-1", testDescribe("testfixture1/testfixture1_test.go", "a", "b", nil, "// Fatalf is equivalent to Logf followed by FailNow.\nfunc (c *common) Fatalf(format string, args ...interface{})\n\n/usr/local/go/src/testing/testing.go:655\n"))
+	t.Run("run-inside-test-1", testDescribe("testfixture1/testfixture1_test.go", "a", "b", nil, "// Fatalf is equivalent to Logf followed by FailNow.\nfunc (c *common) Fatalf(format string, args ...interface{})\n\n/usr/local/go/src/testing/testing.go:?\n"))
 	t.Run("run-inside-test-2", testDescribe("testfixture1/testfixture1_test.go", "c", "d", nil, "func somefn()\n\n/home/a/n/go2def/internal/testfixture1/testfixture1_test.go:5\n"))
 
 }
