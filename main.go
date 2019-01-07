@@ -468,6 +468,8 @@ func printTypesTypeNice(t types.Type) string {
 	})
 }
 
+//go:generate stringer -type InfoKind
+
 type Description []Info
 
 type Info struct {
