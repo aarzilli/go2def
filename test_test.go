@@ -419,3 +419,4 @@ func safeRemoveAll(dir string) {
 	}
 	os.Remove(dir)
 }
+
