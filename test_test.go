@@ -18,21 +18,21 @@ func must(err error) {
 	}
 }
 
-func findSel(path, start, end string) (pos [2]int) {
+func findSel(t *testing.T, path, start, end string) (pos [2]int) {
 	buf, err := ioutil.ReadFile(path)
 	must(err)
 	s := string(buf)
 
-	pos[0] = findPos(s, start, true)
+	pos[0] = findPos(t, s, start, true)
 	if end == "" {
 		pos[1] = pos[0]
 	} else {
-		pos[1] = findPos(s, end, false)
+		pos[1] = findPos(t, s, end, false)
 	}
 	return
 }
 
-func findPos(s, expr string, isstart bool) int {
+func findPos(t *testing.T, s, expr string, isstart bool) int {
 	needle := expr
 	off := 0
 	op := strings.Index(expr, "+")
@@ -53,7 +53,7 @@ func findPos(s, expr string, isstart bool) int {
 
 	needleidx := strings.Index(s, needle)
 	if needleidx < 0 {
-		panic("not found")
+		t.Fatal("not found")
 	}
 
 	if isstart && opch != '-' {
@@ -75,7 +75,7 @@ func testDescribe(path string, start, end string, modify []modifyfn, tgt Descrip
 			path = filepath.Join(wd, "internal", path)
 		}
 
-		pos := findSel(path, start, end)
+		pos := findSel(t, path, start, end)
 
 		t.Logf("describe %s:#%d:#%d", oldpath, pos[0], pos[1])
 
@@ -197,9 +197,9 @@ func wildmatch(pattern, out string) bool {
 	}
 }
 
-func insert(expr string, ins string) func(s string) string {
+func insert(t *testing.T, expr string, ins string) func(s string) string {
 	return func(s string) string {
-		i := findPos(s, expr, true)
+		i := findPos(t, s, expr, true)
 		return s[:i] + ins + s[i:]
 	}
 }
@@ -342,7 +342,7 @@ func TestExpansionDescribe(t *testing.T) {
 func TestModified(t *testing.T) {
 	t.Run("call-to-func-in-same-file-modified-1", testDescribe("testfixture1/f.go", "i", "", nil, Description{}))
 	//"\n"
-	t.Run("call-to-func-in-same-file-modified-2", testDescribe("testfixture1/f.go", "i", "", []modifyfn{insert("i", "callable2(b.Xmember)")}, Description{
+	t.Run("call-to-func-in-same-file-modified-2", testDescribe("testfixture1/f.go", "i", "", []modifyfn{insert(t, "i", "callable2(b.Xmember)")}, Description{
 		Info{Kind: InfoFunction, Text: "// callable2 is a blah blah blah\nfunc callable2(x int) int"},
 		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture1/callable2.go:"},
 	}))
@@ -397,6 +397,49 @@ func TestTests(t *testing.T) {
 	}))
 }
 
+func TestBuildTags(t *testing.T) {
+	// _$GOOS.go
+	t.Run("build-tags-goos-1", testDescribe("testfixture3/testfixture3_windows.go", "a", "b", nil, Description{
+		Info{Kind: InfoFunction, Text: "func samefilefn()"},
+		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture3/testfixture3_windows.go:"},
+	}))
+	t.Run("build-tags-goos-2", testDescribe("testfixture3/testfixture3_windows.go", "c", "d", nil, Description{
+		Info{Kind: InfoFunction, Text: "func otherfilefn()"},
+		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture3/support_windows.go:"},
+	}))
+
+	// _$GOARCH.go
+	t.Run("build-tags-goarch-1", testDescribe("testfixture3/testfixture3_amd64.go", "a", "b", nil, Description{
+		Info{Kind: InfoFunction, Text: "func samefilefn2()"},
+		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture3/testfixture3_amd64.go:"},
+	}))
+	t.Run("build-tags-goarch-2", testDescribe("testfixture3/testfixture3_amd64.go", "c", "d", nil, Description{
+		Info{Kind: InfoFunction, Text: "func otherfilefn2()"},
+		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture3/support_amd64.go:"},
+	}))
+
+	// _$GOOS_$GOARCH.go
+	t.Run("build-tags-goos-gooarch-1", testDescribe("testfixture3/testfixture3_windows_amd64.go", "a", "b", nil, Description{
+		Info{Kind: InfoFunction, Text: "func otherfilefn()"},
+		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture3/support_windows.go:"},
+	}))
+	t.Run("build-tags-goos-goarch-2", testDescribe("testfixture3/testfixture3_windows_amd64.go", "c", "d", nil, Description{
+		Info{Kind: InfoFunction, Text: "func otherfilefn2()"},
+		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture3/support_amd64.go:"},
+	}))
+
+	t.Run("build-tags-tags-1", testDescribe("testfixture3/testfixture3_withabuildtag.go", "a", "b", nil, Description{
+		Info{Kind: InfoFunction, Text: "func samefilefn3()"},
+		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture3/testfixture3_withabuildtag.go:"},
+	}))
+
+	t.Run("build-tags-tags-12", testDescribe("testfixture3/testfixture3_withabuildtag.go", "c", "d", nil, Description{
+		Info{Kind: InfoFunction, Text: "func otherfilefn3()"},
+		Info{Kind: InfoPos, Pos: "$INTERNAL/testfixture3/support_withabuildtag.go:"},
+	}))
+
+}
+
 func safeRemoveAll(dir string) {
 	dh, err := os.Open(dir)
 	if err != nil {
@@ -419,4 +462,3 @@ func safeRemoveAll(dir string) {
 	}
 	os.Remove(dir)
 }
-
