@@ -348,7 +348,7 @@ func describeNode(ctx *context, pkg *packages.Package, node ast.Node) {
 	switch node := node.(type) {
 	case *ast.Ident:
 		obj := pkg.TypesInfo.Uses[node]
-		if obj == nil {
+		if obj == nil || obj.Pkg() == nil {
 			ctx.out.err("unknown identifier %v\n", node)
 			return
 		}
